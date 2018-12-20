@@ -83,18 +83,18 @@ volatile uint32_t temp_cnt=0;
 void TIM2_IRQHandler(void)
 {
 	temp_cnt=TIM3->CNT;
-	if(TIM3->SR & (uint16_t)0x0001)
+	if(TIM3->SR & (uint16_t)0x0001)//if timers reached TOP at the same time
 	{
 		temp_cnt=0;
 		k++;
 	}
-    freq=(k*0xffff+(temp_cnt))*2;
+    freq=(k*0xffff+temp_cnt)*2;
     k=0;
     TIM2->SR =~ (uint16_t)0x0001;
-	//HAL_TIM_IRQHandler(&htim2);
 	TIM3->CNT=0;
 	TIM2->CNT=0;
 }
+
 
 /**
 * @brief This function handles TIM3 global interrupt.
@@ -103,7 +103,6 @@ void TIM3_IRQHandler(void)
 {
   HAL_TIM_IRQHandler(&htim3);
   k++;
-  GPIOC->ODR ^=(1<<13);
 }
 
 int main(void)
@@ -155,9 +154,6 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = 8;
 
-//  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
- // RCC_OscInitStruct.HSIState = RCC_HSI_ON;
- // RCC_OscInitStruct.HSICalibrationValue = 16;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -165,8 +161,6 @@ void SystemClock_Config(void)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
-
-
 
     /**Initializes the CPU, AHB and APB busses clocks 
     */
@@ -215,6 +209,7 @@ static void MX_NVIC_Init(void)
   /* TIM3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(TIM3_IRQn, 1, 0);
   HAL_NVIC_EnableIRQ(TIM3_IRQn);
+  //USB interrupt priority 2.
 }
 
 /* TIM1 init function */
@@ -314,11 +309,6 @@ static void MX_TIM2_Init(void)
 static void MX_TIM3_Init(void)
 {
 
-  TIM_SlaveConfigTypeDef sSlaveConfig;
-  TIM_MasterConfigTypeDef sMasterConfig;
-  TIM_IC_InitTypeDef sConfigIC;
-  TIM_ClockConfigTypeDef sClockSourceConfig;
-
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 2-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -341,15 +331,9 @@ static void MX_TIM3_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  GPIO_InitStruct.Pin = GPIO_PIN_13;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);////////////////////////////////////////////////////////
-
   TIM3->CCMR1 |=(1<<8);
   TIM3->SMCR |=7;
   TIM3->SMCR |=(1<<6)|(1<<5);
-
   TIM3->CR1 |= TIM_CR1_CEN;
 }
 
@@ -358,7 +342,6 @@ static void MX_TIM4_Init(void)
 {
 
   TIM_ClockConfigTypeDef sClockSourceConfig;
-  TIM_MasterConfigTypeDef sMasterConfig;
   TIM_OC_InitTypeDef sConfigOC;
 
   htim4.Instance = TIM4;
