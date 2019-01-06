@@ -80,28 +80,38 @@ volatile uint32_t k=0;
 volatile uint32_t freq=0;
 volatile uint32_t temp_cnt=0;
 
+
+#define ITM_Port32(n) (*((volatile unsigned long *)(0xE0000000+4*n)))
+
 void TIM2_IRQHandler(void)
 {
-	temp_cnt=TIM3->CNT;
-	if(TIM3->SR & (uint16_t)0x0001)//if timers reached TOP at the same time
+	TIM4->CR1 &=~ TIM_CR1_CEN;//Disable timers
+	TIM2->CR1 &=~ TIM_CR1_CEN;
+
+	temp_cnt=TIM4->CNT;
+	if(TIM4->SR & (uint16_t)0x0001)//if timers reached TOP at the same time
 	{
-		temp_cnt=0;
 		k++;
 	}
-    freq=(k*0xffff+temp_cnt)*2;
+
+    freq=(k*0xffff+TIM4->CNT)*2;
     k=0;
-    TIM2->SR =~ (uint16_t)0x0001;
-	TIM3->CNT=0;
+    TIM2->SR &=~ (uint16_t)0x0001;//clear interrupt flag
+	TIM4->CNT=0;
 	TIM2->CNT=0;
+
+	TIM2->CR1 |= TIM_CR1_CEN;
+	TIM4->CR1 |= TIM_CR1_CEN;
+
 }
 
 
 /**
 * @brief This function handles TIM3 global interrupt.
 */
-void TIM3_IRQHandler(void)
+void TIM4_IRQHandler(void)
 {
-  HAL_TIM_IRQHandler(&htim3);
+  HAL_TIM_IRQHandler(&htim4);
   k++;
 }
 
@@ -122,10 +132,10 @@ int main(void)
   MX_NVIC_Init();
 
   HAL_TIM_Base_Start_IT(&htim2);
-  HAL_TIM_Base_Start_IT(&htim3);
+  HAL_TIM_Base_Start_IT(&htim4);
 
   HAL_Delay(500);
-	USBsend("This device displays frequency of signal from PA7 Pin.\r\n"
+	USBsend("This device displays frequency of signal from PB7 Pin.\r\n"
           "Result is displayed in Hz.\r\n"
           "Square wave outputs:\r\nPB7-1kHz\r\nPA9-1MHz\r\nPA8-8MHz");
 	HAL_Delay(500);
@@ -171,7 +181,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
@@ -206,9 +216,9 @@ static void MX_NVIC_Init(void)
   /* TIM2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(TIM2_IRQn);
-  /* TIM3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM3_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(TIM3_IRQn);
+  /* TIM4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(TIM4_IRQn, 1, 0);
+  HAL_NVIC_EnableIRQ(TIM4_IRQn);
   //USB interrupt priority 2.
 }
 
@@ -309,76 +319,65 @@ static void MX_TIM2_Init(void)
 static void MX_TIM3_Init(void)
 {
 
-  htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 2-1;
-  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 0xffff;
-  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
-  {
-    _Error_Handler(__FILE__, __LINE__);
-  }
+	  TIM_ClockConfigTypeDef sClockSourceConfig;
+	  TIM_OC_InitTypeDef sConfigOC;
 
-  __HAL_RCC_GPIOC_CLK_ENABLE();
+	  htim3.Instance = TIM3;
+	  htim3.Init.Prescaler = 72-1;
+	  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+	  htim3.Init.Period = 1000-1;
+	  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+	  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+	  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+	  {
+	    _Error_Handler(__FILE__, __LINE__);
+	  }
 
-  /**TIM3 GPIO Configuration
-  PA7     ------> TIM3_CH2
-  */
-  GPIO_InitTypeDef GPIO_InitStruct;
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+	  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+	  {
+	    _Error_Handler(__FILE__, __LINE__);
+	  }
 
-  TIM3->CCMR1 |=(1<<8);
-  TIM3->SMCR |=7;
-  TIM3->SMCR |=(1<<6)|(1<<5);
-  TIM3->CR1 |= TIM_CR1_CEN;
+	  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+	  {
+	    _Error_Handler(__FILE__, __LINE__);
+	  }
+
+	  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+	  sConfigOC.Pulse = 500;
+	  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+	  sConfigOC.OCFastMode = TIM_OCFAST_ENABLE;
+	  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+	  {
+	    _Error_Handler(__FILE__, __LINE__);
+	  }
+
+	  HAL_TIM_MspPostInit(&htim3);
+
+	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+
 }
 
 /* TIM4 init function */
 static void MX_TIM4_Init(void)
 {
-
-  TIM_ClockConfigTypeDef sClockSourceConfig;
-  TIM_OC_InitTypeDef sConfigOC;
-
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 72-1;
+  htim4.Init.Prescaler = 2-1;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 1000-1;
+  htim4.Init.Period = 0xffff;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+
   if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
 
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
-  {
-    _Error_Handler(__FILE__, __LINE__);
-  }
-
-  if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
-  {
-    _Error_Handler(__FILE__, __LINE__);
-  }
-
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 500;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_ENABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
-  {
-    _Error_Handler(__FILE__, __LINE__);
-  }
-
-  HAL_TIM_MspPostInit(&htim4);
-
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
-
+  TIM4->CCMR1 |=(1<<8);
+  TIM4->SMCR |=7;
+  TIM4->SMCR |=(1<<6)|(1<<5);
+  TIM4->CR1 |= TIM_CR1_CEN;
 }
 
 /** Configure pins
@@ -402,7 +401,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pin = GPIO_PIN_7;
    GPIO_InitStruct.Mode = GPIO_MODE_AF_INPUT;
    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 }
 
@@ -435,7 +434,7 @@ void _Error_Handler(char *file, int line)
   * @retval None
   */
 void assert_failed(uint8_t* file, uint32_t line)
-{ 
+{
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
      tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */

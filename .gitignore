@@ -5,8 +5,6 @@
 .metadata
 bin/
 tmp/
-*.su
-*.o
 *.tmp
 *.bak
 *.swp
@@ -72,3 +70,5 @@ local.properties
 
 
 # End of https://www.gitignore.io/api/eclipse
+/Debug/
+/Release/
