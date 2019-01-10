@@ -1,1 +1,1 @@
-Based on stm32f1 bluepill board. It measure Frequency on PA7 pin and sends value in Hz to PC via usb cdc.
+Based on stm32f1 bluepill board. It measure Frequency on PB7 pin and sends value in Hz to PC via usb cdc.

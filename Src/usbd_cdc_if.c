@@ -128,6 +128,8 @@ uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
 
+
+
 /* USER CODE END PRIVATE_VARIABLES */
 
 /**
@@ -175,6 +177,14 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS =
   CDC_Receive_FS
 };
 
+uint8_t receivedata[APP_RX_DATA_SIZE];
+uint32_t USBdatalenght=0;
+
+uint8_t *USBgetdata(uint32_t *lenght)
+{
+	*lenght=USBdatalenght;
+	return receivedata;
+}
 /* Private functions ---------------------------------------------------------*/
 /**
   * @brief  Initializes the CDC media low layer over the FS USB IP
@@ -290,8 +300,16 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
   */
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
+	uint32_t j=0;
   /* USER CODE BEGIN 6 */
+	USBdatalenght=(*Len);
+	for(j=0;j<(*Len);j++)
+	{
+		receivedata[j]=Buf[j];
+	}
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
+  /*set soft interrupt to inform upper layer of incoming packet*/
+  EXTI->SWIER=EXTI_SWIER_SWI0;
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);
   /* USER CODE END 6 */
@@ -344,8 +362,13 @@ void USBsend_Float(float i)
     char temp[32];
     //Change it if your device does not support floats.
    //sprintf(temp,"%d",(int)i);
-    sprintf(temp,"%f",i);
+    sprintf(temp,"%.2f",i);
 	USBsend(temp);
+}
+
+void USBsend_raw(uint8_t data)
+{
+  CDC_Transmit_FS(&data,1);
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */

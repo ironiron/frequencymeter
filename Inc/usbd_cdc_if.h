@@ -135,6 +135,8 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
 void USBsend (char *str);
 void USBsend_Int(int i);
 void USBsend_Float(float i);
+void USBsend_raw(uint8_t);
+uint8_t * USBgetdata(uint32_t *ptr);
 
 /* USER CODE BEGIN EXPORTED_FUNCTIONS */
 

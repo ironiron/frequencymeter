@@ -50,6 +50,7 @@
 #include "stm32f1xx_hal.h"
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
+#include <string.h>
 
 /* USER CODE BEGIN Includes */
 
@@ -76,75 +77,264 @@ static void MX_TIM1_Init(void);
 static void MX_NVIC_Init(void);                                    
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 
-volatile uint32_t k=0;
+volatile uint32_t k=0;//counter
+volatile uint32_t tim_interrupt=0;
 volatile uint32_t freq=0;
-volatile uint32_t temp_cnt=0;
+volatile uint32_t USBpacketreceived=0;
+volatile float PWM_freq=0;
+volatile float PWM_duty=0;
+volatile uint32_t timprescaler=1;
 
+volatile uint32_t b=0;
+volatile uint32_t a=0;
 
-#define ITM_Port32(n) (*((volatile unsigned long *)(0xE0000000+4*n)))
+volatile enum current_mode
+{
+	inputfrequency,
+	inputPWM
+}current_mode;
 
 void TIM2_IRQHandler(void)
 {
-	TIM4->CR1 &=~ TIM_CR1_CEN;//Disable timers
-	TIM2->CR1 &=~ TIM_CR1_CEN;
+  if (current_mode == inputfrequency)
+    {
+      TIM4->CR1 &= ~ TIM_CR1_CEN; //Disable timers
+      TIM2->CR1 &= ~ TIM_CR1_CEN;
 
-	temp_cnt=TIM4->CNT;
-	if(TIM4->SR & (uint16_t)0x0001)//if timers reached TOP at the same time
+      if (TIM4->SR & (uint16_t) 0x0001) //if timers reached TOP at the same time
 	{
-		k++;
+	  k++;
 	}
+      freq = (k * 0xffff + (TIM4->CNT)) * timprescaler;
+      TIM2->CNT = 0;
+      TIM4->CNT = 0;
+      k = 0;
 
-    freq=(k*0xffff+TIM4->CNT)*2;
-    k=0;
-    TIM2->SR &=~ (uint16_t)0x0001;//clear interrupt flag
-	TIM4->CNT=0;
-	TIM2->CNT=0;
-
-	TIM2->CR1 |= TIM_CR1_CEN;
-	TIM4->CR1 |= TIM_CR1_CEN;
-
+      TIM2->CR1 |= TIM_CR1_CEN;
+      TIM4->CR1 |= TIM_CR1_CEN;
+    }
+  tim_interrupt = 1;
+  TIM2->SR &= ~(uint16_t) 0x0001; //clear interrupt flag
 }
 
-
-/**
-* @brief This function handles TIM3 global interrupt.
-*/
 void TIM4_IRQHandler(void)
 {
-  HAL_TIM_IRQHandler(&htim4);
+  TIM4->SR &= ~(uint16_t) 0x0001; //clear interrupt flag
   k++;
+}
+
+void EXTI0_IRQHandler(void)
+{
+  EXTI->PR = EXTI_PR_PIF0; //clear interrupt
+  USBpacketreceived = 1;
+}
+
+void tim_init_PWM(void)
+{
+  current_mode=inputPWM;
+  /*clean registers*/
+  TIM4->SMCR =0;
+  TIM4->CCMR1 =0;
+  TIM4->CCER =0;
+
+  TIM4->PSC=timprescaler-1;
+  TIM4->CCMR1 |=TIM_CCMR1_CC2S_0;//IC2 mapped on TI2
+  TIM4->CCMR1 |=TIM_CCMR1_CC1S_1;//IC1 mapped on TI2
+  TIM4->CCER  |=TIM_CCER_CC2P;//falling edge IC2
+  TIM4->CCER  &=~TIM_CCER_CC1P;//rising edge IC1
+  TIM4->SMCR |=TIM_SMCR_TS_1 | TIM_SMCR_TS_2 | TIM_SMCR_SMS_2;//slave mode-rest,Filtered Timer Input 2
+  TIM4->CCER |=TIM_CCER_CC1E | TIM_CCER_CC2E;//Enable capture
+  /*disable interrupt*/
+  TIM4->DIER &=~TIM_DIER_UIE;
+  TIM4->EGR = TIM_EGR_UG;//Generate an update event to reload the Prescaler
+}
+
+void tim_init_freq(void)
+{
+  current_mode=inputfrequency;
+  /*clean registers*/
+  TIM4->SMCR =0;
+  TIM4->CCMR1 =0;
+  TIM4->CCER =0;
+
+  TIM4->PSC=timprescaler-1;
+  TIM4->CCMR1 |=TIM_CCMR1_CC2S_0;//IC2 mapped on TI2
+  TIM4->SMCR |=TIM_SMCR_SMS_0 | TIM_SMCR_SMS_1 | TIM_SMCR_SMS_2;//external clock mode 1
+  TIM4->SMCR |=TIM_SMCR_TS_2 | TIM_SMCR_TS_1;//Filtered input 2
+  /*enable interrupt*/
+  TIM4->DIER |=TIM_DIER_UIE;
+  TIM4->EGR = TIM_EGR_UG;//Generate an update event to reload the Prescaler
+}
+
+void ProcessCmd (void)
+{
+  uint32_t buf_len;
+  uint8_t *buff = NULL; //pointer to received data
+  uint8_t temp_buf[50]; //temporary buffer of received data
+  int8_t index = 0;
+
+  USBpacketreceived = 0;
+  USBsend ("\n\n\r----Entered Settings mode----\n\r"
+	   "Syntax: \r\n"
+	   "command=value;\n\r"
+	   "Type help, for available commands or exit to return.\n\r");
+  USBsend ("\n\rwaiting for command>>");
+  while (1)
+    {
+      if (USBpacketreceived == 1)
+	{
+	  USBpacketreceived = 0;
+	  buff = USBgetdata (&buf_len);
+	  temp_buf[index] = *buff;
+	  CDC_Transmit_FS (buff, buf_len);
+	  if (temp_buf[index] == '\r' || temp_buf[index] == '\n') //pressed enter
+	    {
+
+	      if (strncmp (temp_buf, "exit", 4) == 0) //typed exit
+		{
+		  return;
+		}
+	      else if (strncmp (temp_buf, "help", 4) == 0) //typed exit
+		{
+		  USBsend("\r\n---Possible commands---"
+		      "\r\nPWM=<value> where value can be a number between 1-3"
+		      "\r\neach number represents measureable input PWM frequency:"
+		      "\r\n1:	72kHz-1,2kHz"
+		      "\r\n2:	2,4kHz-40Hz"
+		      "\r\n3:	1,44KHz-24Hz"
+		      "\r\n"
+		      "\r\nfreq=<value> where value is timer prescaler and can be a number between 1-65536"
+		      "\r\nFor most cases use 1."
+		      "\r\nexit to exit"
+		      "\r\nhelp to show above content");
+		}
+	      else if (strncmp (temp_buf, "PWM=", 4) == 0) //typed exit
+		{
+		  timprescaler=atoi(&temp_buf[4]);
+		  switch (timprescaler)
+		  {
+		    case 1:
+		      break;
+		    case 2:
+		      timprescaler=30;
+		      break;
+		    case 3:
+		      timprescaler=50;
+		      break;
+		    default:
+		      timprescaler=1;
+		      USBsend("\r\nWrong value!");
+		      break;
+		  }
+		  tim_init_PWM();
+		}
+	      else if (strncmp (temp_buf, "freq=", 5) == 0) //typed exit
+		{
+		  timprescaler=atoi(&temp_buf[5]);
+		  tim_init_freq();
+		}
+	      else //wrong command
+		{
+		  USBsend ("\r\n\n***wrong command!!!***\r\nTry again");
+		}
+		  for (; index >= 0; index--) //clear buffer and set index=0
+		    {
+		      temp_buf[index] = 0;
+		    }
+	      USBsend ("\n\rwaiting for command>>");
+	    }
+	  if(temp_buf[index]==8)//backspace pressed
+	    {
+	      temp_buf[index]=0;
+	      if(index!=0)
+		{
+		  USBsend(" ");
+		  USBsend_raw(8);
+		  index--;
+		  temp_buf[index]=0;
+		}
+	      else
+		{
+		  USBsend("\033[1C");//move cursor forward
+		}
+	      index--;//because in next step index is increased whenever new character arrived or just backspaced.
+	    }
+	  index++;
+	  if(index>45)//safety feature
+	    {
+	      temp_buf[index]=0;
+	      index=45;
+	    }
+	}
+    }
 }
 
 int main(void)
 {
-  HAL_Init();
-
-  SystemClock_Config();
-
-  MX_GPIO_Init();
-  MX_TIM2_Init();
-  MX_USB_DEVICE_Init();
-  MX_TIM3_Init();
-  MX_TIM4_Init();
-  MX_TIM1_Init();
-
+  HAL_Init ();
+  SystemClock_Config ();
+  MX_GPIO_Init ();
+  MX_TIM2_Init ();
+  MX_USB_DEVICE_Init ();
+  MX_TIM3_Init ();
+  //MX_TIM4_Init ();
+  MX_TIM1_Init ();
   /* Initialize interrupts */
-  MX_NVIC_Init();
+  MX_NVIC_Init ();
 
-  HAL_TIM_Base_Start_IT(&htim2);
-  HAL_TIM_Base_Start_IT(&htim4);
+  __HAL_RCC_TIM4_CLK_ENABLE();
+  tim_init_freq();
+  HAL_TIM_Base_Start_IT (&htim2);
+  TIM4->CR1 |= TIM_CR1_CEN;
+  TIM2->CR1 |= TIM_CR1_CEN;
+  TIM4->DIER |=TIM_DIER_UIE;
 
-  HAL_Delay(500);
-	USBsend("This device displays frequency of signal from PB7 Pin.\r\n"
-          "Result is displayed in Hz.\r\n"
-          "Square wave outputs:\r\nPB7-1kHz\r\nPA9-1MHz\r\nPA8-8MHz");
-	HAL_Delay(500);
+  HAL_Delay (500);
+  USBsend ("\r\n\nThis device displays frequency of signal from PB7 Pin.\r\n"
+	   "Square wave outputs:\r\nPA7-1kHz\r\nPA9-1MHz\r\nPA8-8MHz");
+  HAL_Delay (500);
   while (1)
-  {
-	  HAL_Delay(1000);
-      USBsend("\n\rfrequency=");
-      USBsend_Int(freq);
-  }
+    {
+      if (tim_interrupt == 1)
+	{
+	  tim_interrupt = 0;
+	  switch (current_mode)
+	    {
+	    case inputPWM:
+	      PWM_freq = TIM4->CCR2 + 1; //temporary
+	      PWM_duty = TIM4->CCR1 + 1;
+	      PWM_duty = (PWM_freq - PWM_duty) * 100 / PWM_freq;
+	      PWM_freq = 72000000 / timprescaler / PWM_freq;
+	      USBsend ("\n\rFrequency=");
+	      USBsend_Float (PWM_freq);
+	      USBsend ("Hz");
+	      USBsend ("\n\rDuty=");
+	      USBsend_Float(PWM_duty);
+	      USBsend ("%");
+	      break;
+	    case inputfrequency:
+	      USBsend ("\n\rfrequency=");
+	      USBsend_Int (freq);
+	      USBsend ("Hz");
+
+	      break;
+	    }
+	}
+      if (USBpacketreceived == 1)
+	{
+	  USBpacketreceived = 0;
+	  TIM4->CR1 &= ~ TIM_CR1_CEN; //Disable timers
+	  TIM2->CR1 &= ~ TIM_CR1_CEN;
+
+	  ProcessCmd ();
+
+	  k = 0;
+	  TIM4->CNT = 0;
+	  TIM2->CNT = 0;
+	  TIM2->CR1 |= TIM_CR1_CEN;
+	  TIM4->CR1 |= TIM_CR1_CEN;
+	}
+    }
 }
 
 /**
@@ -220,6 +410,11 @@ static void MX_NVIC_Init(void)
   HAL_NVIC_SetPriority(TIM4_IRQn, 1, 0);
   HAL_NVIC_EnableIRQ(TIM4_IRQn);
   //USB interrupt priority 2.
+
+  /*This interrupt is used for informing about USB DATA OUT */
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+  EXTI->IMR=EXTI_IMR_IM0;
 }
 
 /* TIM1 init function */
@@ -363,7 +558,7 @@ static void MX_TIM3_Init(void)
 static void MX_TIM4_Init(void)
 {
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 2-1;
+  htim4.Init.Prescaler = 9;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 0xffff;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -373,11 +568,6 @@ static void MX_TIM4_Init(void)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
-
-  TIM4->CCMR1 |=(1<<8);
-  TIM4->SMCR |=7;
-  TIM4->SMCR |=(1<<6)|(1<<5);
-  TIM4->CR1 |= TIM_CR1_CEN;
 }
 
 /** Configure pins
