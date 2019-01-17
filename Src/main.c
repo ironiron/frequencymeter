@@ -83,7 +83,7 @@ volatile uint32_t freq=0;
 volatile uint32_t USBpacketreceived=0;
 volatile float PWM_freq=0;
 volatile float PWM_duty=0;
-volatile uint32_t timprescaler=1;
+volatile uint32_t timprescaler=50;
 
 volatile uint32_t b=0;
 volatile uint32_t a=0;
@@ -283,7 +283,7 @@ int main(void)
   MX_NVIC_Init ();
 
   __HAL_RCC_TIM4_CLK_ENABLE();
-  tim_init_freq();
+  tim_init_PWM();
   HAL_TIM_Base_Start_IT (&htim2);
   TIM4->CR1 |= TIM_CR1_CEN;
   TIM2->CR1 |= TIM_CR1_CEN;

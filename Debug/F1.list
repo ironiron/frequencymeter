@@ -9144,8 +9144,8 @@ void ProcessCmd (void)
  8003f16:	f003 0304 	and.w	r3, r3, #4
  8003f1a:	930f      	str	r3, [sp, #60]	; 0x3c
  8003f1c:	9b0f      	ldr	r3, [sp, #60]	; 0x3c
-  tim_init_freq();
- 8003f1e:	f7ff fdc3 	bl	8003aa8 <tim_init_freq>
+  tim_init_PWM();
+ 8003f1e:	f7ff fd93 	bl	8003a48 <tim_init_PWM>
   HAL_TIM_Base_Start_IT (&htim2);
  8003f22:	484a      	ldr	r0, [pc, #296]	; (800404c <main+0x35c>)
  8003f24:	f7fe fab6 	bl	8002494 <HAL_TIM_Base_Start_IT>
